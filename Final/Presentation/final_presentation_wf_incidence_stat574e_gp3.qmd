@@ -1,0 +1,821 @@
+---
+title: "Wildfire Incidence in Arizona"
+subtitle: "Group 3 | STAT574E Final Project"
+date: "12/11/2024"
+author: "Raymond Owino, Alex Salce, Matthew Wallace"
+format: 
+  revealjs:
+    smaller: true
+    scrollable: false
+    page-layout: full
+    auto-stretch: true
+theme: simple
+css: custom.css
+---
+
+## Wildfire Incidence in Arizona
+
+:::: {.columns}
+
+::: {.column width="60%"}
+Our project investigates different approaches to spatial statistical modeling of wildfire incidence data in Arizona, with a focus on Coconino County (Northern AZ). 
+
+The "Wildfire Incidence" data we will be studying specifies coordinates for a fire's origin, and its resulting size in acres.
+
+Overall practical goal: modeling wildfire incidence to aid in prediction/assessment of wildfire risks in AZ based on relevant information.
+:::
+
+::: {.column width="40%"}
+<div style="display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 2fr 1fr; gap: 5px;">
+  <div style="grid-column: 1 / span 2;">
+![](images/wfires.JPEG){width=100% .lightbox}
+  </div>
+  <div>
+![](images/wildfires_all_plot.png){width=70% .lightbox}
+  </div>
+  <div>
+![](images/az_cc_wf.png){width=70% .lightbox}
+  </div>
+</div>
+:::
+
+::::
+
+ 
+## Wildfire Incidence Dataset
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+:::{#figlogo}
+
+![](images/nifclogo.png){width=75%}
+
+:::
+
+:::
+
+::: {.column width="50%"}
+
+Our incidence data uses the **National Interagency Fire Center** [Wildland Fire Incident Locations](https://data-nifc.opendata.arcgis.com/datasets/b4402f7887ca4ea9a6189443f220ef28_0/explore?location=-0.000000%2C0.000000%2C1.38) dataset. 
+
+This dataset includes point locations and corresponding data for all wildland fires in the United States reported to the [IRWIN system](https://www.wildfire.gov/application/irwin-integrated-reporting-wildfire-information), which aggregates wildfire incidence data from around the country. 
+
+The dataset has all IRWIN data entries since 2014 (it is still updated daily).
+
+There are over 300K records in this dataset, and just over 18K in Arizona.
+
+:::
+
+::::
+
+## Wildfire Incidence Dataset
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+:::{#figlogo}
+
+![](images/nifclogo.png){width=75%}
+
+:::
+
+:::
+
+::: {.column width="50%"}
+
+Refinement of this dataset utilized the following data attributes (of 96 columns) for incidence filtering & covariates.
+
+- `x` and `y` | Spatial coordinates in lat/lon
+- `IncidentSize` | Size of the resulting wildfire in acres
+- `FireCause` | Human, Natural, Unknown, Undetermined
+- `FireDiscoveryDateTime` | Date & time of incident reporting
+- `IncidentTypeCategory` | WF (wildfire) or RX (prescribed burn)
+
+
+:::
+
+::::
+
+## Research Question 1
+
+### In what ways can we approach spatial modeling of this data to produce useful insights?
+
+## Wildfire Incidence Data - Continuous, Fixed Spatial Index
+
+This dataset offered us a unique opportunity to take multiple approaches to spatial statistical modeling. Using the available data attributes, we can approach our data from different angles.
+
+ - **Continuous, fixed** - Treating `x` and `y` as coordinates as fixed and using `IncidentSize` as a continuous response, our data is geostatistical.
+
+#### Modeling approach
+
+- **Spatial Linear Model** - Module 2, similar to Holland example in *Continuously indexed spatial data (geostatistics)*, or the `dioxane` analysis in HW2.
+
+$$
+\boldsymbol{\mathrm{y}}=\boldsymbol{\mathrm{X}}^{T}\boldsymbol{\beta}+\boldsymbol{e}\,\,\,\,\boldsymbol{e}\sim\mathrm{N}(\boldsymbol{0},\Sigma(\boldsymbol{\theta}))
+$$
+
+## Wildfire Incidence Data - Continuous, Fixed Spatial Index
+
+#### Spatial Linear Model Data
+
+::: {layout-ncol=3}
+
+![](images/dioxane.png){.lightbox}
+
+![](images/hollandsplm.png){.lightbox}
+
+![](images/az_wf_small.png){.lightbox}
+:::
+
+## Wildfire Incidence Data - Point Process 1
+
+This dataset offered us a unique opportunity to take multiple approaches to spatial statistical modeling. Using the available data attributes, we can approach our data from different angles.
+
+ - **Point process** - Using `x` and `y` as coordinates and `IncidentSize` as a *threshold*, we can study "large wildfires" (`IncidentSize` $\geq 1000$ acres) as point process data. 
+
+
+#### Modeling approach
+
+- **Log-Gaussian Cox Process** Module 4, similar to Gorillas LGCP example in *Random spatial index (point pattern)*, or the `earthquakes_um` analysis of Kansas in HW4.
+
+$$
+\log(\lambda(u))=\mathrm{\boldsymbol{Z}}(u)\boldsymbol{\beta}+e(u),\,\,\,\,e(u)\sim\mathrm{N}(0,C(\boldsymbol{\theta})),\,\,\,\,C(u,u')=\sigma^{2}e^{-||u-u'||/h}
+$$
+
+## Wildfire Incidence Data - Point Process 1
+
+#### Log-Gaussian Point Process Model Data
+
+::: {layout-ncol=3}
+
+![](images/gorillas_lgcp.png){.lightbox width=30%}
+
+![](images/kansas.png){.lightbox width=30%}
+
+![](images/az_wf_lg_unmarked.png){.lightbox width=20%}
+
+:::
+![](images/az_cc_wf_lg.png){.lightbox width=18% fig-align="right"}
+
+## Wildfire Incidence Data - Point Process 2
+
+This dataset offered us a unique opportunity to take multiple approaches to spatial statistical modeling. Using the available data attributes, we can approach our data from different angles.
+
+ - **Point process** - Using `x` and `y` as coordinates and `IncidentSize` as a *threshold*, we can study "large wildfires" (`IncidentSize` $\geq 1000$ acres) as point process data.
+
+
+#### Modeling approach
+
+- **Binary Response Spatial Logistic Regression** - Module 5, similar to Gorillas Logistic Regression GLM example in *Non-Gaussian spatial data*.
+
+$$
+\mathrm{logit}(\lambda_{1}(\mathrm{\boldsymbol{s}}))=\boldsymbol{\mathrm{x}}(\mathrm{\boldsymbol{s}})^{T}\boldsymbol{\beta}+e(\mathrm{\boldsymbol{s}})+\log(\lambda_{0}),
+$$ 
+
+::: {.smallmath}
+$$
+Y(\boldsymbol{s}) \sim \mathrm{Bern}(p(\boldsymbol{s})),\,\,\,\, \mathrm{E}[ Y (\boldsymbol{s}) ] = p(\boldsymbol{s}) = \frac{\lambda_{1}(\boldsymbol{s})}{\lambda_{0}(\boldsymbol{s})+\lambda_{1}(\boldsymbol{s})}
+$$
+:::
+
+## Wildfire Incidence Data - Point Process 2
+
+#### Binary GLM Spatial Logistic Regression Model Data
+
+::: {layout-ncol=2}
+
+![](images/gorillas_binary.png){.lightbox}
+
+![](images/az_wf_cc_binary.png){.lightbox}
+:::
+
+
+## Research Questions (2)
+
+
+
+### Can we find useful covariate data that can improve our models?
+
+## Research Questions (2)
+
+
+
+#### Can we find useful covariate data that can improve our models?
+
+
+::: {#fig-rdprox layout-ncol=2}
+
+![All wildfires](images/az_rd_proximity1.png){#fig-wfpoints width=40% .lightbox}
+
+![Proximity to major roads](images/az_rd_proximity2.png){#fig-wfpointsrds width=40% .lightbox}
+
+Roads and wildfires in AZ
+
+:::
+
+Data explorations showed some clear wildfire patterns near roads (the outlines are visible). We wanted to include the distance in meters to the nearest major roads (and "remote" roads) as usable predictors. For each point, the `roads()` function in the `tigris` package to generate `sf` objects for AZ roads, and `st_distance()` function in the `sf` package helped us generate this data to be used as a covariate.
+
+
+
+## Research Questions (2)
+
+
+#### Can we find useful covariate data that can improve our models?
+
+Raymond and Matt collected data for environmental and human factors to address research question 2 (RQ2) in our modeling efforts.
+
+
+## Research Questions (2)
+
+#### Can we find useful covariate data that can improve our models?
+
+::: {#fig-cap layout-ncol=2}
+
+![Natural Wildfires](images/popdensity_nat.png){fig-cap="Natural Wildfires" width=60% .lightbox}
+
+![Human Caused Wildfires](images/popdensity_hum.png){fig-cap="Human Caused Wildfires" width=60% .lightbox}
+
+Data retrieved from the `tidycensus` R package with `get_decennial` function. Plots show log population density for each tract in Arizona from 2010.
+
+:::
+
+
+
+## Research Questions (3)
+
+#### Are the patterns of human or non human caused fires spatially CSR, or do they exhibit an inhomogeneous spatial intensity?
+
+Matt's LGCP models address research question 3.
+
+## Modeling - Coconino County
+:::: {.columns}
+
+::: {.column width="40%"}
+
+We opted to focus our modeling efforts on Coconino County based on some inital model fits, and overall size of the dataset. 
+
+Coconino County is home to national forests like Coconino, Kaibab, and Apache-Sitgreaves, and has the most wildfire incidence in the state by a good margin.
+
+:::
+
+::: {.column width="60%"}
+
+![](images/az_wf_countcounty.png){width=85% fig-align="center"}
+
+:::
+
+::::
+
+
+
+
+## Spatial Linear Model approach
+
+ - **Continuous, fixed** - Treating `x` and `y` as coordinates as fixed and using `IncidentSize` as a continuous response, our data is geostatistical.
+
+#### Modeling approach
+
+- **Spatial Linear Model** - Module 2, similar to Holland example in *Continuously indexed spatial data (geostatistics)*, or the `dioxane` analysis in HW2.
+
+$$
+\boldsymbol{\mathrm{y}}=\boldsymbol{\mathrm{X}}^{T}\boldsymbol{\beta}+\boldsymbol{e}\,\,\,\,\boldsymbol{e}\sim\mathrm{N}(\boldsymbol{0},\Sigma(\boldsymbol{\theta}))
+$$
+
+## Log-Gaussian Cox Process Approach
+
+ - **Point process** - Using `x` and `y` as coordinates and `IncidentSize` as a *threshold*, we can study "large wildfires" (`IncidentSize` $\geq 1000$ acres) as point process data. 
+
+
+#### Modeling approach
+
+- **Log-Gaussian Cox Process** Module 4, similar to Gorillas LGCP example in *Random spatial index (point pattern)*, or the `earthquakes_um` analysis of Kansas in HW4.
+
+$$
+\log(\lambda(u))=\mathrm{\boldsymbol{Z}}(u)\boldsymbol{\beta}+e(u),\,\,\,\,e(u)\sim\mathrm{N}(0,C(\boldsymbol{\theta})),\,\,\,\,C(u,u')=\sigma^{2}e^{-||u-u'||/h}
+$$
+
+
+## Log-Gaussian Cox Process Approach
+
+#### Prediction Surfaces
+
+::: {#fig-cap}
+
+![](images/predictors_im.png){fig-cap="Predictors" width=100% .lightbox}
+
+Heat map surfaces of each predictor used in the LGCP model.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### Response Surfaces
+
+::: {#fig-cap}
+
+![](images/coco_wf_plot.png){fig-cap="Predictors" width=100% .lightbox}
+
+Locations of wildfires in Coconino. Separated by cause and size.
+
+:::
+
+Goal: Fit an intensity surface for each of these plots using our predictors in a LGCP model.
+
+## Log-Gaussian Cox Process Approach
+
+#### All Human Caused Wildfires
+
+
+```r
+coco_wf_hum.kppm <- kppm(unmark(coco_wf_hum.ppp)~., 
+                         data=predictors.im, 
+                         clusters = "LGCP", 
+                         model = "exponential")
+plot(predict(coco_wf_hum.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_hum_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+All human caused wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### Large Human Caused Wildfires
+
+
+```r
+coco_wf_hum_lg.kppm <- kppm(unmark(coco_wf_hum_lg.ppp)~., 
+                            data=predictors.im, 
+                            clusters = "LGCP", 
+                            model = "exponential")
+plot(predict(coco_wf_hum_lg.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_hum_lg_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+Large human caused wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### Small Human Caused Wildfires
+
+
+```r
+coco_wf_hum_sm.kppm <- kppm(unmark(coco_wf_hum_sm.ppp)~., 
+                            data=predictors.im, 
+                            clusters = "LGCP",
+                            model = "exponential")
+plot(predict(coco_wf_hum_sm.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_hum_sm_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+Small human caused wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### All Natural Wildfires
+
+
+```r
+coco_wf_nat.kppm <- kppm(unmark(coco_wf_nat.ppp)~.,
+                         data=predictors.im, 
+                         clusters = "LGCP", 
+                         model = "exponential")
+plot(predict(coco_wf_nat.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_nat_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+All natural wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### Large Natural Wildfires
+
+
+```r
+coco_wf_nat_lg.kppm <- kppm(unmark(coco_wf_nat_lg.ppp)~.,
+                            data=predictors.im, 
+                            clusters = "LGCP", 
+                            model = "exponential")
+plot(predict(coco_wf_nat_lg.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_hum_lg_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+Large natural wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+#### Small Human Caused Wildfires
+
+
+```r
+coco_wf_nat_sm.kppm <- kppm(unmark(coco_wf_nat_sm.ppp)~., 
+                            data=predictors.im, 
+                            clusters = "LGCP", 
+                            model = "exponential")
+plot(predict(coco_wf_nat_sm.kppm, eps = 15000))
+```
+
+::: {#fig-cap}
+
+![](images/coco_wf_nat_sm_intensity.png){fig-cap="Predictors" width=60% .lightbox}
+
+Small natural wildfire intensity surface.
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+::: {#fig-cap}
+
+![](images/coco_wf_intensity_grid.png){fig-cap="Predictors" width=85% .lightbox}
+
+:::
+
+## Log-Gaussian Cox Process Approach
+
+$$
+C(u,u')=\sigma^{2}e^{-||u-u'||/h}
+$$
+
+|                      |$\sigma^2$(partial sill)|    h(range)|
+|:---------------------|-----------------------:|-----------:|
+| All Human Caused     | 4.728370e+00           | 7791.704   |
+| Large Human Caused   | 3.220770e-09           | 29691.296  |
+| Small Human Caused   | 4.688047e+00           | 7806.519   |
+| All Natural          | 5.472859e-01           | 9910.462   |
+| Large Natural        | 1.400144e+00           | 5681.422   |
+| Small Natural        | 2.056924e+00           | 12054.552  |
+
+
+## Research Questions (3)
+
+#### Are the patterns of human or non human caused fires spatially CSR, or do they exhibit an inhomogeneous spatial intensity?
+
+::: {#fig-cap}
+
+![](images/coco_envelope_plot_grid.png){fig-cap="Predictors" width=100% .lightbox}
+
+Green represents the intercept only model; red represents our model with all predictors.
+
+:::
+
+## Research Questions (3)
+
+#### Arizona CSR Analysis
+
+::: {#fig-cap}
+
+![](images/AZ_envelope_plot_grid.png){fig-cap="Predictors" width=100% .lightbox}
+
+:::
+
+## Binary GLM Spatial approach
+
+ - **Point process** - Using `x` and `y` as coordinates and `IncidentSize` as a *threshold*, we can study "large wildfires" (`IncidentSize` $\geq 1000$ acres) as point process data.
+
+
+#### Modeling approach
+
+- **Binary Response Spatial Logistic Regression** - Module 5, similar to Gorillas Logistic Regression GLM example in *Non-Gaussian spatial data*.
+
+$$
+\mathrm{logit}(\lambda_{1}(\mathrm{\boldsymbol{s}}))=\boldsymbol{\mathrm{x}}(\mathrm{\boldsymbol{s}})^{T}\boldsymbol{\beta}+e(\mathrm{\boldsymbol{s}})+\log(\lambda_{0}),
+$$ 
+
+::: {.smallmath}
+$$
+Y(\boldsymbol{s}) \sim \mathrm{Bern}(p(\boldsymbol{s})),\,\,\,\, \mathrm{E}[ Y (\boldsymbol{s}) ] = p(\boldsymbol{s}) = \frac{\lambda_{1}(\boldsymbol{s})}{\lambda_{0}(\boldsymbol{s})+\lambda_{1}(\boldsymbol{s})}
+$$
+:::
+
+## Binary GLM Spatial approach
+
+:::: {.columns}
+
+::: {.column width="40%"}
+
+We now want to study risk of occurence of large wildfire (`Indidentsize`$\geq 1000$ acres) spatially in terms of probabilities. We will also restrict occurrences to `FireCause=="Natural"`. 
+
+To build the model, we filter the data and treat large wildfire incident locations as a realization of a point process with intensity surface $\lambda_1(\mathrm{\boldsymbol{s}})$. 
+
+For these points, we assign a response value of $Y(\boldsymbol{s})=1$ (`Wildfires`).
+
+:::
+
+::: {.column width="60%"}
+
+::: {.smallmath}
+$$
+\mathrm{logit}(\lambda_{1}(\mathrm{\boldsymbol{s}}))=\boldsymbol{\mathrm{x}}(\mathrm{\boldsymbol{s}})^{T}\boldsymbol{\beta}+\underset{\text{spatial effect}}{\underbrace{e(\mathrm{\boldsymbol{s}})}}+\log(\lambda_{0}),
+$$ 
+:::
+
+::: {.smallmath}
+$$
+Y(\boldsymbol{s}) \sim \mathrm{Bern}(p(\boldsymbol{s})),
+$$
+:::
+
+::: {.smallmath}
+$$
+\mathrm{E}[ Y (\boldsymbol{s}) ] = p(\boldsymbol{s}) = \frac{\lambda_{1}(\boldsymbol{s})}{\lambda_{0}(\boldsymbol{s})+\lambda_{1}(\boldsymbol{s})}
+$$
+:::
+
+![$n=66$ incidence points](images/az_wf_cc_binary_1s.png){width=55% fig-align="center" .lightbox}
+
+:::
+
+::::
+
+
+## Binary GLM Spatial approach
+
+:::: {.columns}
+
+::: {.column width="40%"}
+
+Next we generate a background realization of a known constant Poisson process $\lambda_0$, which represent locations that a large wildfire could have happened but did not (note incident date/time is randomly assigned 2014 to present). 
+
+We also collect all the covariate data at these points (time consuming).
+
+For these points, we assign a response value of $Y(\boldsymbol{s})=0$  (`Wildfires`).
+
+
+:::
+
+::: {.column width="60%"}
+
+::: {.smallmath}
+$$
+\mathrm{logit}(\lambda_{1}(\mathrm{\boldsymbol{s}}))=\boldsymbol{\mathrm{x}}(\mathrm{\boldsymbol{s}})^{T}\boldsymbol{\beta}+\underset{\text{spatial effect}}{\underbrace{e(\mathrm{\boldsymbol{s}})}}+\log(\lambda_{0}),
+$$ 
+:::
+
+::: {.smallmath}
+$$
+Y(\boldsymbol{s}) \sim \mathrm{Bern}(p(\boldsymbol{s})),
+$$
+:::
+
+::: {.smallmath}
+$$
+\mathrm{E}[ Y (\boldsymbol{s}) ] = p(\boldsymbol{s}) = \frac{\lambda_{1}(\boldsymbol{s})}{\lambda_{0}(\boldsymbol{s})+\lambda_{1}(\boldsymbol{s})}
+$$
+:::
+
+![$n=73$ background points](images/az_wf_cc_binary_0s.png){width=45% fig-align="center" .lightbox}
+
+
+:::
+
+::::
+
+
+## Binary GLM Spatial approach
+
+Our model can then be built using selected covariates we desire for predictors and performing a binary logistic regression. The resulting prediction model will return the probability of the occurrence of a large wildfire for a given input location and corresponding values for the model's chosen covariates.
+
+![66 incidence points, 73 background points](images/az_wf_cc_binary.png){width=45% fig-align="center" .lightbox}
+
+## Binary GLM Spatial approach
+
+##### Model Selection
+
+The selection of covariates of the model utilized a semi-automated process that minimized AIC. There were some issues with model convergence for some spatial covariance fits, and AIC did not necessarily favor significant predictors in the end.
+
+```r
+spglm_formula <- Wildfires ~  I(sqrt(distance_rd_min_isprisec)) + I(log(pop.density)) +
+  Precipitation_Buffered * Temp_Min_Buffered + I(get_season(FireDiscoveryDateTime)) +
+  mean_grass * mean_forest
+
+az_wf_spcov <- spcov_initial("wave")
+
+az_wf_spglm <- spglm(spglm_formula, data = model_data_sf, 
+                     family = binomial, spcov_initial = az_wf_spcov)
+```
+::: {.smallmath}
+*The best AIC model tested utilized square root minimum distance from major roads, log population density data at the coordinates, interactions of environmental factors, and season.*
+:::
+
+## Binary GLM Spatial approach
+
+### Model Summary Quick Look
+
+:::: {.columns}
+
+::: {.column width="80%"}
+
+```r
+Call:
+spglm(formula = spglm_formula, family = binomial, data = model_data_sf, 
+    spcov_initial = az_wf_spcov)
+
+Deviance Residuals:
+     Min       1Q   Median       3Q      Max 
+-2.79364 -0.37217 -0.03644  0.38603  2.67112 
+
+Coefficients (fixed):
+                                         Estimate Std. Error z value Pr(>|z|)  
+(Intercept)                              -2.31282    7.91520  -0.292   0.7701  
+I(sqrt(distance_rd_min_isprisec))        -1.32153    0.81237  -1.627   0.1038  
+I(log(pop.density))                      -0.10851    0.49135  -0.221   0.8252  
+Precipitation_Buffered                    0.06916    2.08641   0.033   0.9736  
+Temp_Min_Buffered                        -1.12366    0.78317  -1.435   0.1514  
+I(get_season(FireDiscoveryDateTime))      0.54990    0.37428   1.469   0.1418  
+mean_grass                                1.07408    1.74733   0.615   0.5388  
+mean_forest                               1.30509    1.21915   1.070   0.2844  
+Precipitation_Buffered:Temp_Min_Buffered  0.39667    0.52455   0.756   0.4495  
+mean_grass:mean_forest                   15.29506    9.16978   1.668   0.0953 .
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Pseudo R-squared: 0.3684
+
+Coefficients (wave spatial covariance):
+       de        ie     range 
+2.832e+00 3.549e-02 3.554e+04 
+
+Coefficients (Dispersion for binomial family):
+dispersion 
+         1 
+```
+:::
+
+::: {.column width="20%"}
+
+$\sigma_{sill} = 2.832e+00$
+$\sigma_{nugget} = 3.549e-02$
+$\text{range} = 3.554e+04 \,\,(\sim\text{35.5 km})$
+
+::: {.smallmath}
+*Reasonable spatial fit diagnostics!*
+:::
+
+:::
+
+::::
+
+## Binary GLM Spatial approach
+
+#### CIs Quick Look
+
+```r
+> confint(az_wf_spglm)
+                                               2.5 %     97.5 %
+(Intercept)                              -17.8263262 13.2006939
+I(sqrt(distance_rd_min_isprisec))         -2.9137530  0.2706848
+I(log(pop.density))                       -1.0715342  0.8545142
+Precipitation_Buffered                    -4.0201412  4.1584522
+Temp_Min_Buffered                         -2.6586537  0.4113346
+I(get_season(FireDiscoveryDateTime))      -0.1836816  1.2834872
+mean_grass                                -2.3506191  4.4987742
+mean_forest                               -1.0844096  3.6945865
+Precipitation_Buffered:Temp_Min_Buffered  -0.6314373  1.4247793
+mean_grass:mean_forest                    -2.6773800 33.2675083
+```
+
+
+::: {#fig-CIs}
+
+![CIs for fixed effects](images/spglm_bin_CI1.png){#fig-ci1 width=34% fig-align="center" .lightbox}
+
+Confidence Intervals
+:::
+
+
+## Binary GLM Spatial approach
+
+### Predictions
+
+
+
+:::: {.columns}
+
+::: {.column width="50%"}
+
+:::{#figgrid}
+
+![](images/pred_grid.png){width=75%}
+
+:::
+
+:::
+
+::: {.column width="50%"}
+
+Due to some challenges we faced with the computational time/energy to recover realistic data for covariates, our ability to generate appropriate covariate data for predictions disallowed predictions with high resolution. 
+
+We generated a grid of equally spaced points within Coconino County, amounting to 293 total points to use as prediction locations. All prediction covariate data was captured for `2023-12-31 12:00:00`.
+
+:::
+
+::::
+
+## Binary GLM Spatial approach
+
+### Predictions
+
+:::: {.columns}
+
+::: {.column width="65%"}
+
+:::{#figgrid}
+
+![](images/predict_surface_overlayanimation.gif){.lightbox width=110%}
+
+
+:::
+
+:::
+
+::: {.column width="35%"}
+
+This is the result prediction surface (treating each grid point prediction as representative probability for the pixel's region), and the wildfire incidence points as well as the areas of national forests in the region overlayed.
+
+**Not totally outrageous!**
+
+:::
+
+::::
+
+## Binary GLM Spatial approach
+
+#### Well...maybe a little outrageous?
+
+::: {#fig-sweeps layout-ncol=2}
+
+![+/- 5°C `Temp_Min_Buffered` sweep](images/predict_surface_tempsweep.gif){#fig-wfpoints width=75% .lightbox}
+
+![+/- 10% `Precipitation_Buffered` sweep](images/predict_surface_precipsweep.gif){#fig-wfpointsrds width=75% .lightbox}
+
+Prediction surface for adjusting annual min temperature and precipitation
+
+:::
+
+More background process points? Predictors correlated? Spatial confounding?
+
+
+## Conclusions and Future Research
+
+- Models at least demonstrate proof-of-concept (RQ1)
+
+- We found covariate data that improved our models (RQ2)
+
+- We found some interesting patterns of CSR/non-CSR for different types of fire incidence (RQ3)
+
+::: {#fig-sweeps layout-ncol=3}
+
+![Spatial Linear Model](images/splm.png){#fig-splmconc .lightbox}
+
+![Log-Gaussian Cox Process](images/coco_wf_intensity_grid.png){#fig-lgcpconc .lightbox}
+
+![Binary Spatial GLM](images/predict_surface_overlayanimation.gif){#fig-binaryglmconc .lightbox}
+
+:::
+
+
+## Conclusions and Future Research
+
+With some extra refinement, they could feasibly aid in better allocation of resources for fire prevention, possible forecasting, and information that can be coupled with other ecological models.
+
+Some considerations for future model refinements.
+
+- Better methods for recovering covariate data for better predictions
+- Spatio-Temporal modeling?
+- More careful treatment of highly correlated predictors
+- More points for background realization for Binary model
+- Other model scoring/tuning
+
+There is also a lot more that can be done with this dataset, we encourage you to check it out!
+
+## Thank you! {.center}
+### Questions?
+

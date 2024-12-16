@@ -1,0 +1,1163 @@
+---
+title: "Appendix C"
+author: "Alex Salce"
+# date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+    theme: cosmo
+header-includes:
+- \renewcommand*\familydefault{\sfdefault} %% this picks a sans serif font
+- \usepackage[T1]{fontenc}
+---
+
+```{r warning=FALSE, message=FALSE}
+
+library(dplyr)
+library(tigris)
+library(sf)
+library(ggplot2)
+library(mapview)
+library(tidyverse)
+library(scales)
+library(knitr)
+library(readr)
+
+```
+
+Packages we need.
+
+```{r datasetload, warning=FALSE, message=FALSE, echo=FALSE}
+
+# load datasets
+library(here)
+set_here(path='../../')
+
+load(here('data/wfigs_az_sf_EPSG32612.RData'))
+load(here('data/az_rd_4WD_EPSG32612.RData'))
+load(here('data/az_rd_primary_EPSG32612.RData'))
+load(here('data/az_rd_secondary_EPSG32612.RData'))
+load(here('data/naz_forests_sf_EPSG32612.RData'))
+
+
+#NOTE: all sf object data uses CRS ESPG:32612
+# https://epsg.io/32612
+
+
+```
+
+We have a few datasets that we have pre-constructed based on available resources and challenges with acquiring data for the features that we are interested in modeling. Note that all `sf` objects are projected to `EPSG:3612` ([https://epsg.io/32612](https://epsg.io/32612)).
+
+- `wfigs_az_sf` is a `sf` object with 18089 observations of wildfire incidence in the state of Arizona. This data was originally acquired via [Wildland Fire Incident Locations](https://data-nifc.opendata.arcgis.com/datasets/nifc::wildland-fire-incident-locations/about) from the National Interagency Fire Center. It contains spatial point data indicating the origin of each wildfire recorded in the [IRWIN](https://www.wildfire.gov/application/irwin-integrated-reporting-wildfire-information) database, and includes many useful features. Most notably, the data includes the `IncidentSize`, which is the size in acres of the resulting wildfire. `IncidentSize` is the primary response variable of interest for our study. The data included in this dataframe includes hand-selected features that were deemed to be potentially useful during the exploration phase of the project, as well as other data manually recovered for natural and environmental factors, distances to roads in Arizona, as well as census data for population density, discussed elsewhere in the report.
+
+-`az_rd_primary` and `az_rd_secondary` are `sf` data of all roads in Arizona with FCC road classification codes of `S1100` or `S1200`. These two classes are treated as "major" roads in our analyses. `az_rd_4WD` is all roads with `S1500` classification, and are representative of remote roadways in Arizona. All other road types are removed/disregarded as they are deemed not useful for our analysis. [See this document for all classification codes](https://docs.fcc.gov/public/attachments/DA-12-187A3.pdf).
+
+
+```{R azstatesf, cache = TRUE, message = FALSE, warning = FALSE, results = 'hide'}
+
+arizona_sf <- states() %>% filter_state("arizona")
+arizona_sf <- st_transform(arizona_sf, crs = "EPSG:32612")
+
+az_counties_sf <- counties(state = "AZ", cb = TRUE)
+az_counties_sf <- st_transform(az_counties_sf, crs = "EPSG:32612")
+
+# make national forest objects
+
+coconino_nf_sf <- naz_forests_sf[naz_forests_sf$FORESTNAME=="Coconino National Forest",]
+
+kaibab_nf_sf <- naz_forests_sf[naz_forests_sf$FORESTNAME=="Kaibab National Forest",]
+
+
+```
+First, we are going to load the `sf` object for the state of Arizona and project to `EPSG:32612`.
+
+### Create Wildfire Dataframes
+
+```{r finaldataframes}
+
+az_fires_rx <- wfigs_az_sf %>% filter(IncidentTypeCategory=="RX")
+az_fires_wf <- wfigs_az_sf %>% filter(IncidentTypeCategory=="WF")
+
+az_fires_wf_hum <- az_fires_wf %>% filter(FireCause=="Human")
+az_fires_wf_nat <- az_fires_wf %>% filter(FireCause=="Natural")
+az_fires_wf_un <- az_fires_wf %>% filter(FireCause=="Undetermined" | FireCause=="Unknown")
+
+
+```
+
+For our analyses using `wfigs_az_sf`, we want to be sure to differentiate between fires that are prescribed burns (`IncidentTypeCategory=="RX"`) and wildfires (IncidentTypeCategory=="WF"). Our analyses will only use fires of type `WF`, since prescribed burns are fires deliberately started and controlled by a service entity.
+
+We also want to differentiate fires by their causes. There are four unique categories of fire in the `FireCause` column, `HUMAN`, `NATURAL`, `UNDETERMINED`, and `UNKNOWN`. For our analyses, we will discard `UNDETERMINED` and `UNKNOWN` type fires, as we cannot reasonably assume anything about them. Additionally, they comprise only about 12% of all of the `wfigs_az_sf` data.
+
+
+## Histograms
+
+### Nearest Roads
+
+This histogram uses input `sf` object to create `histdf`, which is used to generate a histogram of the number of closest roads, either primary/secondary roads or 4wd roads, to each wildfire incident origin. The $x$-axis indicates the distance in meters of that bin to wildfire points.
+
+As a generalization, we will think of Primary & Secondary roads as essentially the same class of roads, and we know that many humans use these roads every day. No matter the stretch of road, there is a good chance of there being some human settlement of some kind alongside these roads within close proximity.
+
+The "4WD" roads are technically a fairly "incomplete" dataset, but they do give a sense of areas humans can spend their time in remote areas. In general, though, if a wildfire incident is closer to a 4WD road we can think of it as being a "more remote" fire, i.e. there is a good chance it's fairly removed from any prominent human settlement.
+
+For reference, the minimum distances as well as the closest road type indicators were generated using the below code.
+
+```{r nearestrdDataGen, eval=FALSE}
+
+wfigs_az_sf$distance_rd_primary <-
+  st_distance(wfigs_az_sf, az_rd_primary) %>% apply(1, min)
+
+wfigs_az_sf$distance_rd_secondary <-
+  st_distance(wfigs_az_sf, az_rd_secondary) %>% apply(1, min)
+
+wfigs_az_sf$distance_rd_4wd <-
+  st_distance(wfigs_az_sf, az_rd_4wd) %>% apply(1, min)
+
+
+wfigs_az_sf <- wfigs_az_sf %>%
+  mutate(distance_rd_min_prisec = pmin(distance_rd_primary, 
+                                    distance_rd_secondary))
+
+wfigs_az_sf <- wfigs_az_sf %>%
+  mutate(distance_rd_min_all = pmin(distance_rd_primary, 
+                                    distance_rd_secondary,
+                                    distance_rd_4wd))
+
+wfigs_az_sf$distance_rd_min_isprisec <- as.integer(wfigs_az_sf$distance_rd_min_all ==
+                                                     wfigs_az_sf$distance_rd_min_prisec) 
+
+```
+
+#### All wildfire data
+
+We will first look at the "Nearest Roads" histograms for all wildfire data (no filtering for the size of the fire.)
+
+```{r disthistsmindistprimsec4wdNothresh, echo=FALSE}
+
+
+bins <- 30
+
+# human caused
+
+histdf1 <- az_fires_wf_hum
+
+# naturally caused
+
+histdf2 <- az_fires_wf_nat
+
+# undetermined / unknown cause
+
+histdf3 <- az_fires_wf_un
+
+
+x_rng <- range(c(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+                 histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0],
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0]))
+y_max <- max(hist(histdf1$distance_rd_min_all, plot = FALSE)$counts, 
+             hist(histdf2$distance_rd_min_all, plot = FALSE)$counts)
+
+
+#overlay hist of dist from roads
+
+# one plot
+# par(mfrow=c(1, 2))
+
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to Human caused fires", xlab = "Distance (m)")
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to naturally caused fires", xlab = "Distance (m)")
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+
+
+df_names <- c("Human Caused Fires", "Naturally Caused Fires", "Unknown Caused Fires")
+row_counts <- c(nrow(az_fires_wf_hum), nrow(az_fires_wf_nat), nrow(az_fires_wf_un))
+
+# Create a table
+result_table <- data.frame(WildFireType = df_names, Counts = row_counts)
+
+kable(result_table, label = "Wildfire Counts")
+
+rm(histdf1, histdf2, histdf3, x_rng, y_max, bins, df_names, row_counts, result_table)
+
+```
+
+There is a very high concentration of wildfires cause by humans very close to primary and secondary roads, and natural fires generally seem to be more remote (in general closer to more 4WD roads.)
+
+#### Coconino County Wildfire Data
+
+
+```{r cococounty}
+
+# Extract Coconino County
+coconino_sf <- az_counties_sf %>% 
+  filter(NAME == "Coconino")
+
+az_fires_wf_hum <- az_fires_wf %>% filter(FireCause=="Human")
+az_fires_wf_nat <- az_fires_wf %>% filter(FireCause=="Natural")
+az_fires_wf_un <- az_fires_wf %>% filter(FireCause=="Undetermined" | FireCause=="Unknown")
+
+az_fires_wf_hum <- st_intersection(az_fires_wf_hum, coconino_sf)
+az_fires_wf_nat <- st_intersection(az_fires_wf_nat, coconino_sf)
+az_fires_wf_un <- st_intersection(az_fires_wf_un, coconino_sf)
+
+```
+
+```{r disthistsmindistprimsec4wdNothreshCC, echo=FALSE}
+
+
+bins <- 30
+
+# human caused
+
+histdf1 <- az_fires_wf_hum
+
+# naturally caused
+
+histdf2 <- az_fires_wf_nat
+
+# undetermined / unknown cause
+
+histdf3 <- az_fires_wf_un
+
+
+x_rng <- range(c(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+                 histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0],
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0]))
+y_max <- max(hist(histdf1$distance_rd_min_all, plot = FALSE)$counts, 
+             hist(histdf2$distance_rd_min_all, plot = FALSE)$counts)
+
+
+#overlay hist of dist from roads
+
+# one plot
+# par(mfrow=c(1, 2))
+
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to Human caused fires", xlab = "Distance (m)")
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to naturally caused fires", xlab = "Distance (m)")
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+
+
+df_names <- c("Human Caused Fires", "Naturally Caused Fires", "Unknown Caused Fires")
+row_counts <- c(nrow(az_fires_wf_hum), nrow(az_fires_wf_nat), nrow(az_fires_wf_un))
+
+# Create a table
+result_table <- data.frame(WildFireType = df_names, Counts = row_counts)
+
+kable(result_table, label = "Wildfire Counts")
+
+rm(histdf1, histdf2, histdf3, x_rng, y_max, bins, df_names, row_counts, result_table)
+
+```
+
+
+#### Thresholded for Wildfire Acreage
+
+We define the threshold for a fire to be "large" as `IncidentSize` $\geq 1000$ acres. We threshold the data accordingly and replot our histograms.
+
+```{r thresholding_1}
+
+####################################
+# RUN BELOW FOR FIRE SIZE THRESHOLD#
+####################################
+
+
+# fire size threshold
+# FIRE_SIZE_CLASS = Code for fire size based on the number of acres within the 
+# final fire perimeter (A=greater than 0 but less than or equal to 0.25 acres, 
+# B=0.26-9.9 acres, C=10.0-99.9 acres, D=100-299 acres, E=300 to 999 acres, 
+# F=1000 to 4999 acres, and G=5000+ acres).
+
+# class F and G fires
+wf_size_threshold <- 1000
+
+
+wfigs_az_sf$size_threshold <- as.integer(wfigs_az_sf$IncidentSize >= wf_size_threshold)
+
+wfigs_az_sf_thresh <- wfigs_az_sf %>% filter(size_threshold==1)
+
+
+az_fires_rx <- wfigs_az_sf_thresh %>% filter(IncidentTypeCategory=="RX")
+az_fires_wf <- wfigs_az_sf_thresh %>% filter(IncidentTypeCategory=="WF")
+
+
+#human caused wildfires
+
+table(wfigs_az_sf_thresh$FireCause)
+
+az_fires_wf_hum <- az_fires_wf %>% filter(FireCause=="Human")
+az_fires_wf_nat <- az_fires_wf %>% filter(FireCause=="Natural")
+az_fires_wf_un <- az_fires_wf %>% filter(FireCause=="Undetermined" | FireCause=="Unknown")
+
+```
+
+```{r ppphist, echo=FALSE}
+
+bins <- 30
+
+# human caused
+
+histdf1 <- az_fires_wf_hum
+
+# naturally caused
+
+histdf2 <- az_fires_wf_nat
+
+# undetermined / unknown cause
+
+histdf3 <- az_fires_wf_un
+
+
+x_rng <- range(c(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+                 histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0],
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0]))
+y_max <- max(hist(histdf1$distance_rd_min_all, plot = FALSE)$counts, 
+             hist(histdf2$distance_rd_min_all, plot = FALSE)$counts)
+
+
+#overlay hist of dist from roads
+
+# one plot
+# par(mfrow=c(1, 2))
+
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to Human caused fires", xlab = "Distance (m)")
+hist(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to naturally caused fires", xlab = "Distance (m)")
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+df_names <- c("Human Caused Fires", "Naturally Caused Fires", "Unknown Caused Fires")
+row_counts <- c(nrow(az_fires_wf_hum), nrow(az_fires_wf_nat), nrow(az_fires_wf_un))
+
+# Create a table
+result_table <- data.frame(WildFireType = df_names, Counts = row_counts)
+
+kable(result_table, label = "Wildfire Counts")
+
+rm(histdf1, histdf2, histdf3, x_rng, y_max, bins, df_names, row_counts, result_table)
+
+```
+
+
+
+## Models
+
+### Spatial Linear Model
+
+\[
+\boldsymbol{\mathrm{y}}=\boldsymbol{\mathrm{X}}^{T}\boldsymbol{\beta}+\boldsymbol{e}\,\,\,\,\boldsymbol{e}\sim\mathrm{N}(\boldsymbol{0},\Sigma(\boldsymbol{\theta}))
+\]
+
+### Log-Gaussian Cox Proces
+
+\[
+\log(\lambda(u))=\mathrm{\boldsymbol{Z}}(u)\boldsymbol{\beta}+e(u),\,\,\,\,e(u)\sim\mathrm{N}(0,C(\boldsymbol{\theta})),\,\,\,\,C(u,u')=\sigma^{2}e^{-||u-u'||/h}
+\]
+
+### Point Process Binary Spatial GLM Logistic Regression
+
+\[
+\mathrm{logit}(\lambda_{1}(\mathrm{\boldsymbol{s}}))=\boldsymbol{\mathrm{x}}(\mathrm{\boldsymbol{s}})^{T}\boldsymbol{\beta}+e(\mathrm{\boldsymbol{s}})+\log(\lambda_{0}),\,\,\, Y(\boldsymbol{s}) \sim \mathrm{Bern}(p(\boldsymbol{s})),\,\,\,\, \mathrm{E}[ Y (\boldsymbol{s}) ] = p(\boldsymbol{s}) = \frac{\lambda_{1}(\boldsymbol{s})}{\lambda_{0}(\boldsymbol{s})+\lambda_{1}(\boldsymbol{s})}
+\]
+
+#### Threshold for large wildfires
+
+```{r thresholding_2}
+
+####################################
+# RUN BELOW FOR FIRE SIZE THRESHOLD#
+####################################
+
+
+# fire size threshold
+# FIRE_SIZE_CLASS = Code for fire size based on the number of acres within the 
+# final fire perimeter (A=greater than 0 but less than or equal to 0.25 acres, 
+# B=0.26-9.9 acres, C=10.0-99.9 acres, D=100-299 acres, E=300 to 999 acres, 
+# F=1000 to 4999 acres, and G=5000+ acres).
+
+# class F and G fires
+wf_size_threshold <- 1000
+
+
+wfigs_az_sf$size_threshold <- as.integer(wfigs_az_sf$IncidentSize >= wf_size_threshold)
+# wfigs_az_sf$size_threshold <- as.integer(wfigs_az_sf$IncidentSize < wf_size_threshold)
+
+wfigs_az_sf_thresh <- wfigs_az_sf %>% filter(size_threshold==1)
+
+
+az_fires_rx <- wfigs_az_sf_thresh %>% filter(IncidentTypeCategory=="RX")
+az_fires_wf <- wfigs_az_sf_thresh %>% filter(IncidentTypeCategory=="WF")
+
+
+#human caused wildfires
+
+table(wfigs_az_sf_thresh$FireCause)
+
+az_fires_wf_hum <- az_fires_wf %>% filter(FireCause=="Human")
+az_fires_wf_nat <- az_fires_wf %>% filter(FireCause=="Natural")
+az_fires_wf_un <- az_fires_wf %>% filter(FireCause=="Undetermined" | FireCause=="Unknown")
+
+```
+The first step is to filter our data to only "large" wildfires (`IncidentSize` $\geq 1000$ acres). We are now treating our data as point process data, so the magnitude of the resulting wildfire is no longer of interest. Rather, we will be only studying the occurrence of "big" wildfires.
+
+Since we will be treating the wildfires as a point process, the most sensible data to study should be the naturally occurring fires as it would be reasonable to assume that they occur randomly. For example, naturally occurring fires can be the result of lightning strikes, which we have previously seen modeled using a point process approach.
+
+```{r rm1, echo=FALSE}
+
+rm(az_fires_rx, wf_size_threshold)
+
+```
+
+
+#### Counties
+
+```{r firesbycounty}
+
+# az_county_intersections <- st_intersection(az_counties_sf, rbind(az_fires_wf_hum, az_fires_wf_nat))
+
+# az_county_intersections <- st_intersection(az_counties_sf, az_fires_wf_nat)
+az_county_intersections <- st_intersection(az_counties_sf, wfigs_az_sf[wfigs_az_sf$FireCause=="Human"|wfigs_az_sf$FireCause=="Natural",])
+
+county_counts <- az_county_intersections %>%
+  group_by(NAME) %>%
+  summarise(count = n())
+
+az_counties_with_counts <- az_counties_sf %>%
+  st_join(county_counts, by = "NAME") %>%
+  mutate(count = replace_na(count, 0))
+
+
+ggplot(az_counties_with_counts) +
+  geom_sf(aes(fill = count)) +
+  scale_fill_viridis_c(name = "Point Count") +
+  theme_minimal() +
+  labs(title = "Wildfire Incidence per County in Arizona")
+
+rm(county_counts, az_counties_with_counts, az_county_intersections)
+
+```
+
+```{r cococountythreshold}
+
+#filter large wildfire data to only Coconino County
+az_fires_wf <- st_intersection(az_fires_wf[az_fires_wf$FireCause=="Human" | az_fires_wf$FireCause == "Natural",], coconino_sf)
+
+#filter naz national forest sf objects
+naz_forests_sf <- st_intersection(naz_forests_sf, coconino_sf)
+
+
+```
+
+For this portion of the study, we opted to start smaller by filtering the data down to only Coconino County. Coconino County has the most naturally occurring wildfires in the state by a good margin, and is home to part of the largest contiguous Ponderosa Pine forest in the United States. 
+
+#### Model
+
+##### Additional Packages
+
+```{r sglmlibrary, message=FALSE, warning=FALSE}
+
+library(spatstat)
+library(spmodel)
+library(lubridate)
+library(tidycensus)
+library(ggmap)
+
+```
+
+##### Data Refinement & Additional Exploration
+
+```{r refreshfilter, echo=FALSE}
+
+az_fires_wf_hum <- az_fires_wf %>% filter(FireCause=="Human")
+az_fires_wf_nat <- az_fires_wf %>% filter(FireCause=="Natural")
+az_fires_wf_un <- az_fires_wf %>% filter(FireCause=="Undetermined" | FireCause=="Unknown")
+
+```
+
+Minimum distance to naturally caused fires in Coconino County.
+
+```{r disthistsmindistprimsec4wdThresh, echo=FALSE}
+
+bins <- 10
+
+# human caused
+
+histdf1 <- az_fires_wf_hum
+
+# naturally caused
+
+histdf2 <- az_fires_wf_nat
+
+# undetermined / unknown cause
+
+histdf3 <- az_fires_wf_un
+
+
+x_rng <- range(c(histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==1], 
+                 histdf1$distance_rd_min_all[histdf1$distance_rd_min_isprisec==0],
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+                 histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0]))
+y_max <- max(hist(histdf1$distance_rd_min_all, plot = FALSE)$counts, 
+             hist(histdf2$distance_rd_min_all, plot = FALSE)$counts)
+
+
+#overlay hist of dist from roads
+
+
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==1], 
+     col = rgb(0, 0, 1, 0.5), xlim = x_rng, ylim = c(0, y_max),
+     breaks = bins,
+     main = "Min distance to naturally caused large fires", xlab = "Distance (m)")
+hist(histdf2$distance_rd_min_all[histdf2$distance_rd_min_isprisec==0], 
+     col = rgb(1, 0, 0, 0.5), 
+     breaks = bins,
+     add = TRUE)
+
+# Add a legend
+legend("topright", c("MinDistIsPrimSec", "MinDistIs4WD"),
+       fill = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5)))
+
+df_names <- c("Human Caused Fires", "Naturally Caused Fires", "Unknown Caused Fires")
+row_counts <- c(nrow(az_fires_wf_hum), nrow(az_fires_wf_nat), nrow(az_fires_wf_un))
+
+# Create a table
+result_table <- data.frame(WildFireType = df_names, Counts = row_counts)
+
+kable(result_table, label = "Wildfire Counts")
+
+rm(histdf1, histdf2, histdf3, x_rng, y_max, bins, 
+   df_names, row_counts, result_table, az_fires_wf_un)
+
+```
+
+In general, the naturally occurring fires that end up becoming large are rather remote, as indicated by more roads that are in closer proximity to 4WD roads, and even among those, many of which are over a kilometer away from even the nearest remote roads.
+
+
+##### Building a Background Poisson Process Realization
+
+We will assign `az_fires_wf_spglm` as a placeholder `sf` object for whichever data we are interested in (for flexibility). For the report, we are only analyzing naturally caused "large" wildfires, hence it will be assigned using `az_fires_wf_nat` to generate `ppp` object and subsequent Poisson background realization points. Note that we are following a similar process as outlined in the *Random spatial index (point process) + Binary GLM* application in the *Non-Gaussian spatial data* lecture for the `gorillas` data.
+
+```{r builddataspglmppp, cache=TRUE, warning=FALSE, message=FALSE}
+
+# set seed to 219 for report!
+set.seed(219)
+
+# set seed to 20 for predictions!
+# set.seed(20)
+
+# pick df of interest
+
+az_fires_wf_spglm <- az_fires_wf_nat
+
+
+az_fires_wf_spglm_ppp <- as.ppp(az_fires_wf_spglm)
+
+background <- rpoispp((az_fires_wf_spglm_ppp$n) / area(as.owin(az_fires_wf_spglm_ppp)),
+                      win = as.owin(coconino_sf))
+
+df <- data.frame(x = background$x, y = background$y)
+
+background_sf <- st_as_sf(df, coords = c("x", "y"), crs = "EPSG:32612")
+
+```
+
+```{r azccplotppp}
+
+wf_sf_cc_plot <- st_as_sf(as.data.frame(az_fires_wf_spglm_ppp), coords = c("x", "y"), crs="EPSG:32612")
+
+wf_sf_cc_plot <- st_transform(wf_sf_cc_plot, crs = 4326)
+
+bkg_sf_cc_plot <- st_as_sf(as.data.frame(background), coords = c("x", "y"), crs="EPSG:32612")
+
+bkg_sf_cc_plot <- st_transform(bkg_sf_cc_plot, crs = 4326)
+
+coconino_plot <- coconino_sf %>% st_transform(4326)
+az_cc_bbox <- st_bbox(coconino_plot)
+
+az_cc_bbox <- c(
+  left = az_cc_bbox["xmin"][[1]]-1,
+  bottom = az_cc_bbox["ymin"][[1]]-1,
+  right = az_cc_bbox["xmax"][[1]]+1,
+  top = az_cc_bbox["ymax"][[1]]+1
+)
+
+coconino_map <- get_stadiamap(bbox = az_cc_bbox, zoom = 8)
+
+# plot
+ggmap(coconino_map) + labs(title = "Coconino County Naturally Caused Large Wildfire Incidence", subtitle = "Background realization marked with X") + theme_minimal() +
+  geom_sf(data = coconino_plot, fill = "gray70", alpha = 0.5, color = "black", size = 5, inherit.aes = FALSE) +
+  geom_sf(data=wf_sf_cc_plot, shape = 21, size = 0.9, 
+          color = "orangered3", fill = "orangered3", inherit.aes = FALSE) +
+  geom_sf(data=bkg_sf_cc_plot, shape = 4, size = 1.1, color = "navyblue", inherit.aes = FALSE)
+
+```
+
+```{r rm2, echo=FALSE}
+
+rm(bkg_sf_cc_plot)
+
+```
+
+We first generate a realization of a Poisson point process to represent where Naturally occurring wildfires could have happened in Cocinino County, a simple features object called `background_sf`. For each of the points in the realization opted to generate all of the covariate data, including the census data for population density as well as all of the natural data. The data was a collaborative effort and required some tedious construction of useable dataframes that are column binded to the `background_sf` object. Those details are omitted and the data is provided as an `RData` file that can be imported.
+
+
+```{r importbkgcovs, echo=FALSE}
+
+load(here('data/background_sf.RData'))
+
+```
+
+
+The `background_sf` and `az_fires_wf_spglm`
+
+
+```{r combine bkgwfcovariates}
+
+df1 <- st_drop_geometry(az_fires_wf_spglm)
+df2 <- st_drop_geometry(background_sf)
+
+
+common_cols <- intersect(names(df1), names(df2))
+
+df1 <- df1[, c(common_cols)]
+df2 <- df2[, c(common_cols)]
+
+df1$FireDiscoveryDateTime <- as.Date(df1$FireDiscoveryDateTime)
+df2$FireDiscoveryDateTime <- as.Date(df2$FireDiscoveryDateTime)
+
+
+Covariates <- rbind(df1, df2)
+
+rm(df1,df2,df)
+
+#### row bind to build a model_data_sf sf object for use in our model
+
+all_points <- superimpose(unmark(az_fires_wf_spglm_ppp), background)
+
+Wildfires <- c(rep(1, az_fires_wf_spglm_ppp$n), rep(0, background$n))
+
+data <- cbind(Wildfires, Covariates)
+
+model_data_sf <- st_as_sf(cbind(data, as.data.frame(all_points)[, c('x', 'y')]),
+coords = c('x', 'y'))
+
+```
+
+```{r rm3, echo=FALSE}
+
+rm(Wildfires, data, all_points, background, common_cols, Covariates)
+
+```
+
+A function to create categorical bins for season to use as predictors in wildfire incidence models.
+
+```{r functions}
+
+get_season <- function(date) {
+  month <- as.integer(format(date, "%m"))
+  season <- case_when(
+    month %in% c(12, 1, 2) ~ 1,
+    month %in% c(3, 4, 5) ~ 2,
+    month %in% c(6, 7, 8) ~ 3,
+    month %in% c(9, 10, 11) ~ 4
+  )
+  return(season)
+}
+
+
+```
+
+For our model selection, we used lowest AIC score to select a model. The below chunk produces the AIC for different variants of model fits. This approach is something like a "poor man's" version of the `stepAIC` function from the `MASS` package that can give a best-AIC model and do variable selection in an automated way. This way is not automated, and below is only serving as an example of how some models were compared. The chunk cycles through each model in `formula_list` and does a fit for each of the different `cov_types`. It fits each model using `spglm` and `binary` response and computes AIC for the model, returning a list from which we can select the best AIC model.
+
+
+```{r modelAIC, cache = TRUE}
+
+
+# Create a list of formula objects
+formula_list <- list(
+  as.formula("Wildfires ~ I(sqrt(distance_rd_min_prisec)) +
+  I(sqrt(distance_rd_4wd)) + I(sqrt(distance_rd_min_isprisec)) +
+  I(log(mean_slope)) + mean_forest + mean_grass + I(log(pop.density)) +
+  Precipitation_Buffered + Temp_Min_Buffered + Temp_Max_Buffered +
+  I(month(FireDiscoveryDateTime))"),
+  as.formula("Wildfires ~  I(sqrt(distance_rd_min_isprisec)) +
+  Precipitation_Buffered + Temp_Min_Buffered + I(get_season(FireDiscoveryDateTime)) +
+  mean_grass * mean_forest"),
+  as.formula("Wildfires ~  I(sqrt(distance_rd_min_isprisec)) + I(log(pop.density)) +
+  Precipitation_Buffered * Temp_Min_Buffered +
+  I(get_season(FireDiscoveryDateTime)) +
+  mean_grass * mean_forest")
+
+)
+
+# Define spatial covariance types
+# gaussian best for all so far
+# OUT: cauchy and matern
+cov_types <- c("wave", 
+               "gaussian", 
+               "spherical",
+               "circular")
+
+# initialize results df
+results_df <- data.frame(
+  Model = character(),
+  AIC = numeric(),
+  Pseudo_R_squared = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Outer loop for formulas
+for (i in seq_along(formula_list)) {
+  # Inner loop for spatial covariance types
+  for (j in seq_along(cov_types)) {
+    # Fit the model using spglm
+    model <- spglm(formula_list[[i]], data = model_data_sf, family = binomial, spcov_initial = spcov_initial(cov_types[j]))
+    
+    model_summary <- summary(model)
+
+    # build results df for each model
+    new_row <- data.frame(
+      Model = paste0("Model_", i, "_", cov_types[j]),
+      AIC = AIC(model),
+      Pseudo_R_squared = model_summary$pseudoR2,
+      stringsAsFactors = FALSE
+    )
+    
+    # Append the new row to the results dataframe
+    results_df <- rbind(results_df, new_row)
+    
+  }
+}
+
+kable(results_df)
+
+```
+
+```{r echo=FALSE}
+
+rm(model, cov_types, formula_list, new_row, model_summary)
+
+```
+
+This is only any example to show noteworthy results in this process. 
+
+Some models returned unusually low AICs. Upon investigating, these very-low AIC models were actually just models whose coefficients did not converge. These models are discarded, hence the model we ultimately used.
+
+It's also interesting to note, as we will see below, that a predictor like `pop.density` can be added to the model and improve it by a noticeable margin in terms of AIC score as well as $R^2$, but not be close to a level of significance that we would think it would be "useful" as a predictor, but in fact does improve the model by this measure.
+
+Using lots of methodical trial and error (there were many trial/error steps that are omitted), we selected the model in the below chunk by lowest AIC.
+
+###### Intercept Only Model (for reference)
+
+```{r}
+
+# intercept-only model
+
+spglm_formula <- Wildfires ~  1
+
+
+az_wf_spcov <- spcov_initial("wave")
+
+az_wf_spglm <- spglm(spglm_formula, data = model_data_sf, 
+                     family = binomial, spcov_initial = az_wf_spcov)
+
+summary(az_wf_spglm)
+
+kable(AIC(az_wf_spglm), caption = "Intercept-Only Model AIC")
+
+
+```
+
+```{r intmodelcis}
+
+az_wf_spglm_ci <- as.data.frame(confint(az_wf_spglm))
+
+colnames(az_wf_spglm_ci) <- c("lower", "upper")
+
+az_wf_spglm_ci$estimate <- az_wf_spglm$coefficients$fixed 
+
+az_wf_spglm_ci$variable <- rownames(az_wf_spglm_ci)
+
+kable(az_wf_spglm_ci)
+
+ggplot(az_wf_spglm_ci, aes(x = estimate, y = variable)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Confidence Intervals",
+       x = "Estimate",
+       y = "Variable") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(hjust = 0))
+
+
+```
+
+###### Best AIC model
+
+```{r}
+
+# best AIC model
+
+spglm_formula <- Wildfires ~  distance_rd_min_isprisec + I(log(pop.density)) +
+  Precipitation_Buffered * Temp_Min_Buffered + I(get_season(FireDiscoveryDateTime)) +
+  mean_grass * mean_forest
+
+
+az_wf_spcov <- spcov_initial("wave")
+
+az_wf_spglm <- spglm(spglm_formula, data = model_data_sf, 
+                     family = binomial, spcov_initial = az_wf_spcov)
+
+summary(az_wf_spglm)
+
+kable(AIC(az_wf_spglm), caption = "Model AIC")
+
+
+```
+
+```{r modelcis}
+
+az_wf_spglm_ci <- as.data.frame(confint(az_wf_spglm))
+
+colnames(az_wf_spglm_ci) <- c("lower", "upper")
+
+az_wf_spglm_ci$estimate <- az_wf_spglm$coefficients$fixed 
+
+az_wf_spglm_ci$variable <- rownames(az_wf_spglm_ci)
+
+kable(az_wf_spglm_ci)
+
+ggplot(az_wf_spglm_ci, aes(x = estimate, y = variable)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Confidence Intervals",
+       x = "Estimate",
+       y = "Variable") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(hjust = 0))
+
+
+```
+
+To use our model for predictions, we had to weigh the challenges for acquiring data for our predictors with the time it takes to extract the data (some processing took a lot of time). Below is code that generates a grid of points in Coconino county, and gives us a total of 272 points evenly spaced across the county.
+
+```{r rm4}
+
+rm(az_wf_spglm_ci)
+
+```
+
+```{r getpredictions, eval = FALSE}
+
+# Create a grid of points
+grid <- st_make_grid(coconino_sf, n = c(20, 20), what = "centers")
+
+# Convert the grid to an sf object
+grid_sf <- st_sf(geometry = grid)
+
+# Filter points to keep only those inside Coconino County
+coconino_grid <- grid_sf[coconino_sf, ]
+
+# If you need exactly 200 points, you can sample from the resulting grid
+coconino_grid_n <- coconino_grid %>% 
+  slice_sample(n = 400)
+
+# Plot to verify
+plot(st_geometry(coconino_sf))
+plot(st_geometry(coconino_grid_n), add = TRUE, col = "red", pch = 20)
+
+prediction_grid <- cbind(st_drop_geometry(coconino_grid_n), st_coordinates(coconino_grid_n)) 
+
+prediction_grid$FireDiscoveryDateTime <- ymd_hm("2023-12-31 12:00")
+
+```
+
+
+##### Predictions
+
+Once we have the points, we go through a similar process of generating the data for roads, census data, and natural factors. The natural factors were taken for the last day of 2023, so that the buffered temperature and precipitation data covers the year of 2023.
+
+Using this data we can generate a plot of predictions from our model. The prediction values express probability that a large wildfire will occur if it were to start at the prediction point coordinates with the predictors used in the model (natural conditions, distances to roads), and population density for the captured data at those points. The visualization treats the prediction at that point as an approximation of other nearby points in the cell.
+
+
+```{r predictionglm}
+
+load(here('data/az_prediction_grid_sf.RData'))
+
+az_wf_predict_spglm <- predict(az_wf_spglm, type = "response", se.fit = T, newdata = az_prediction_grid_sf)
+
+az_prediction_grid_sf$predict_bin_spglm <- az_wf_predict_spglm$fit
+
+predict_plot <- st_transform(az_prediction_grid_sf, crs = 4326)
+
+#national forest geometry for plots
+
+naz_nf_plot <- st_transform(naz_forests_sf, crs = 4326 )
+
+
+#generate pixel grid
+
+plot_coconino_sf <- st_transform(coconino_sf, crs = 4326)
+
+# Create a grid of squares
+grid <- st_make_grid(plot_coconino_sf, n = c(20, 20), what = "polygons")
+
+# Convert the grid to an sf object
+grid_sf <- st_sf(geometry = grid)
+
+# Filter squares to keep only those intersecting with Coconino County
+coconino_grid <- grid_sf[plot_coconino_sf, ]
+
+# Spatial join to transfer predicted values from points to grid squares
+coconino_grid_with_values <- st_join(coconino_grid, predict_plot)
+
+#plot
+
+ggplot() +
+  geom_sf(data = coconino_grid_with_values, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  geom_sf(data = naz_nf_plot, fill = NA, color="turquoise", alpha = 0.5) +
+  # geom_sf(data = coco_nf_plot, fill = "lawngreen", alpha = 0.5, color = NA) +
+  # geom_sf(data = kaibab_nf_plot, fill = "green4", alpha = 0.5, color = NA) +
+  geom_sf(data=wf_sf_cc_plot, shape = 21, size = 1.2,
+          color = "orangered3", fill = "orangered3", inherit.aes = FALSE) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       fill = "Predicted Value")
+
+```
+
+
+Since natural factors like temperature and precipitation can vary year to year, we can modify these predictors to see what kind of effects it has on our predictions.
+
+
+##### Predictor Sweep Animations
+
+*HTML only*
+
+```{r predmapoverlayanim, eval=FALSE, echo=FALSE}
+
+library(animation)
+
+
+plot1 <- ggplot() +
+  geom_sf(data = coconino_grid_with_values, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       fill = "Predicted Value")
+
+plot2 <- ggplot() +
+  geom_sf(data = coconino_grid_with_values, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  geom_sf(data=wf_sf_cc_plot, shape = 21, size = 1.2,
+          color = "orangered3", fill = "orangered3", inherit.aes = FALSE) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       fill = "Predicted Value")
+
+plot3 <- ggplot() +
+  geom_sf(data = coconino_grid_with_values, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  geom_sf(data = naz_nf_plot, fill = "turquoise", alpha = 0.5, color = NA) +
+  geom_sf(data=wf_sf_cc_plot, shape = 21, size = 1.2,
+          color = "orangered3", fill = "orangered3", inherit.aes = FALSE) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       fill = "Predicted Value")
+
+# Create a function to save each plot
+save_plot <- function(plot, filename) {
+  ggsave(filename, plot, width = 12, height = 9)
+}
+
+# Save each plot as a separate PNG file
+save_plot(plot1, "plot1.png")
+save_plot(plot2, "plot2.png")
+save_plot(plot3, "plot3.png")
+
+# Create the GIF
+ani.options(interval = 1)  # Set duration for each frame to 1 second
+im.convert(c("plot1.png", "plot2.png", "plot3.png"), output = "predict_surface_overlayanimation.gif")
+
+# Clean up temporary PNG files
+file.remove(c("plot1.png", "plot2.png", "plot3.png"))
+
+rm(save_plot, plot1, plot2, plot3)
+```
+
+```{r tempsweep, cache=TRUE, eval=FALSE, echo=FALSE}
+
+temp_sweep <- seq(-5, 5, by = 0.5)
+temp_prediction_list <- list()
+
+for (i in seq_along(temp_sweep)) {
+  temp_data <- coconino_grid_with_values
+  temp_data$Temp_Min_Buffered <- temp_data$Temp_Min_Buffered + temp_sweep[i]
+  
+  predictions <- predict(az_wf_spglm, type = "response", se.fit = TRUE, newdata = temp_data)
+  temp_data$predict_bin_spglm <- predictions$fit
+  
+  temp_prediction_list[[i]] <- temp_data
+}
+
+temp_prediction_sf <- do.call(rbind, temp_prediction_list)
+temp_prediction_sf$sweep_value <- rep(temp_sweep, each = nrow(coconino_grid_with_values))
+
+temp_prediction_sf <- st_transform(temp_prediction_sf, crs = 4326)
+
+
+```
+
+```{r precipsweep, cache=TRUE, eval=FALSE, echo=FALSE}
+
+precip_sweep <- seq(0.9, 1.1, by = 0.01)
+precip_prediction_list <- list()
+
+for (i in seq_along(precip_sweep)) {
+  precip_data <- coconino_grid_with_values
+  precip_data$Precipitation_Buffered <- precip_data$Precipitation_Buffered * precip_sweep[i]
+  
+  predictions <- predict(az_wf_spglm, type = "response", se.fit = TRUE, newdata = precip_data)
+  precip_data$predict_bin_spglm <- predictions$fit
+  
+  precip_prediction_list[[i]] <- precip_data
+}
+
+precip_prediction_sf <- do.call(rbind, precip_prediction_list)
+precip_prediction_sf$sweep_value <- rep(precip_sweep, each = nrow(coconino_grid_with_values))
+
+precip_prediction_sf <- st_transform(precip_prediction_sf, crs = 4326)
+
+```
+
+```{r genanimations, echo=FALSE, cache=TRUE, eval=FALSE}
+
+library(gganimate)
+library(gifski)
+
+```
+
+```{r temperatureanimation, cache=TRUE, eval=FALSE, echo=FALSE}
+
+# Temperature animation
+temp_animation <- ggplot() +
+  geom_sf(data = temp_prediction_sf, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       subtitle = "Temperature Change: {round(frame_time, digits = 4)}°C",
+       fill = "Predicted Value") +
+  transition_time(sweep_value) +
+  ease_aes('linear')
+
+temp_animation
+
+
+```
+
+```{r precipanimation, cache=TRUE, eval=FALSE, echo=FALSE}
+
+# Precipitation animation
+precip_animation <- ggplot() +
+  geom_sf(data = precip_prediction_sf, aes(fill = predict_bin_spglm), color = NA) +
+  geom_sf(data = coconino_sf, fill = NA, color = "black", size = 0.5) +
+  scale_fill_viridis_c(option = "B") +
+  theme_minimal() +
+  labs(title = "Large Wildfire Probability Surface in Coconino County",
+       subtitle = "Precipitation Change: {round(frame_time * 100 - 100, digits = 4)}%",
+       fill = "Predicted Value") +
+  transition_time(sweep_value) +
+  ease_aes('linear')
+
+precip_animation
+
+```
+
+
+```{r renderanimations, message=FALSE, warning=FALSE, cache=TRUE, eval=FALSE,echo=FALSE}
+
+# Render temperature animation
+animate(temp_animation, nframes = 20, fps = 2, width = 1200, height = 900,
+        renderer = gifski_renderer("temp_animation.gif"))
+
+# Render precipitation animation
+animate(precip_animation, nframes = 20, fps = 2, width = 1200, height = 900,
+        renderer = gifski_renderer("precip_animation.gif"))
+
+
+```
